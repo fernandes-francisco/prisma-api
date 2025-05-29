@@ -1,21 +1,9 @@
 {
   "version": 2,
   "builds": [
-    {
-      "src": "api/**/*.js",
-      "use": "@vercel/node"
-    }
+    { "src": "api/**/*.js", "use": "@vercel/node" }
   ],
   "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/index.js"
-    }
-  ],
-  "functions": {
-    "api/**/*.js": {
-      "includeFiles": "node_modules/.prisma/client/**",
-      "memory": 1024
-    }
-  }
+    { "src": "/api/(.*)", "dest": "/api/index.js" }
+  ]
 }
