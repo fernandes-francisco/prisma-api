@@ -5,13 +5,15 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "npx prisma migrate dev --name init && npx prisma migrate deploy"
+    "build": "npx prisma generate && npx prisma migrate deploy",
+    "postinstall": "prisma generate"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@ionic/storage-angular": "^4.0.0",
     "@prisma/client": "^6.8.2",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
