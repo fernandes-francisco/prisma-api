@@ -11,23 +11,32 @@ const productsRouter = require('./products');
 
 const app = express();
 
-// 1) CORS configuration
+// CORS configuration
 const corsOptions = {
-  origin: '*', // or specify ['http://localhost:8100'] for dev
-  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization']
+  origin: ['http://localhost:8100', 'http://localhost:3000'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 };
 
+// Apply CORS middleware
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // preflight
+
+// Handle preflight requests for all routes
+app.options('*', cors(corsOptions));
 
 app.use(express.json());
 
-// 2) Mount routers under /v1
+// Mount routers under /v1
 app.use('/v1/users',    usersRouter);
 app.use('/v1/foods',    foodsRouter);
 app.use('/v1/recipes',  recipesRouter);
 app.use('/v1/products', productsRouter);
+
+// Handle 404
+app.use((req, res) => {
+  res.status(404).json({ error: 'Route not found' });
+});
 
 module.exports = app;
 module.exports.handler = serverless(app);
