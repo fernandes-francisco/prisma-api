@@ -1,9 +1,10 @@
 // api/index.js
-const express = require('express');
+const express    = require('express');
 const serverless = require('serverless-http');
-const cors = require('cors');
+const cors       = require('cors');
 require('dotenv').config();
 
+// Import your routers
 const usersRouter    = require('./users');
 const foodsRouter    = require('./foods');
 const recipesRouter  = require('./recipes');
@@ -11,32 +12,30 @@ const productsRouter = require('./products');
 
 const app = express();
 
-// CORS configuration
-const corsOptions = {
-  origin: ['http://localhost:8100', 'http://localhost:3000'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-};
+// 1) Global CORS setup
+app.use(cors({ 
+  origin: ['http://localhost:8100'], // your Ionic dev origin
+  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization']
+}));
 
-// Apply CORS middleware
-app.use(cors(corsOptions));
+// 2) Explicitly handle OPTIONS preflight for every path
+app.options('*', (req, res) => {
+  res.set('Access-Control-Allow-Origin', 'http://localhost:8100');
+  res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  res.sendStatus(204);
+});
 
-// Handle preflight requests for all routes
-app.options('*', cors(corsOptions));
-
+// 3) JSON body parsing
 app.use(express.json());
 
-// Mount routers under /v1
+// 4) Mount your versioned routers
 app.use('/v1/users',    usersRouter);
 app.use('/v1/foods',    foodsRouter);
 app.use('/v1/recipes',  recipesRouter);
 app.use('/v1/products', productsRouter);
 
-// Handle 404
-app.use((req, res) => {
-  res.status(404).json({ error: 'Route not found' });
-});
-
+// 5) Export for Vercel
 module.exports = app;
 module.exports.handler = serverless(app);
