@@ -14,10 +14,12 @@ const app = express();
 // Global CORS (including preflight)
 app.use(cors({
   origin: ['http://localhost:8100', '*'],
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization']
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
-app.options('*', cors()); // preflight responses
+
+// Handle OPTIONS requests explicitly
+app.options('*', cors());
 
 // JSON parsing for POST/PUT
 app.use(express.json());
