@@ -20,10 +20,5 @@
       "methods": ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
       "dest": "/api/index.js"
     }
-  ],
-  "functions": {
-    "api/index.js": {
-      "maxDuration": 10
-    }
-  }
+  ]
 }
