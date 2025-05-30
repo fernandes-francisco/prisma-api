@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const fetch = require('node-fetch');
-const { PrismaClient } = require('../generated/prisma');
+const { PrismaClient } = require('../../generated/prisma');
 
 const prisma = new PrismaClient();
 const UNSPLASH_KEY = process.env.UNSPLASH_KEY;

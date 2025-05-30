@@ -1,7 +1,7 @@
 // api/products.js
 const router = require('express').Router();
 const fetch  = require('node-fetch');
-const { PrismaClient } = require('../generated/prisma');
+const { PrismaClient } = require('../../generated/prisma');
 
 const prisma = new PrismaClient();
 
