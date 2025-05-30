@@ -1,28 +1,33 @@
-const router = require('express').Router();
-const { PrismaClient } = require('../generated/prisma');
+// api/users.js
+const express = require('express');
+const router = express.Router();
+const { PrismaClient } = require('@prisma/client'); // import only
 
-const prisma = new PrismaClient();
-
-// GET /api/users
+// GET all users
 router.get('/', async (req, res) => {
+  // Only instantiate when needed
+  const prisma = new PrismaClient();
   try {
     const users = await prisma.user.findMany();
     res.json(users);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  } finally {
+    await prisma.$disconnect();
   }
 });
 
-// POST /api/users
+// POST create user
 router.post('/', async (req, res) => {
+  const prisma = new PrismaClient();
   const { name, email, password } = req.body;
   try {
-    const user = await prisma.user.create({
-      data: { name, email, password }
-    });
+    const user = await prisma.user.create({ data: { name, email, password } });
     res.status(201).json(user);
   } catch (err) {
     res.status(400).json({ error: err.message });
+  } finally {
+    await prisma.$disconnect();
   }
 });
 
