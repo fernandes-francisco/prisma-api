@@ -2,11 +2,6 @@ const express    = require('express');
 const serverless = require('serverless-http');
 const cors       = require('cors');
 require('dotenv').config();
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
-
-export default prisma;
 
 // Import routers
 const usersRouter    = require('./users');

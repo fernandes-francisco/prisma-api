@@ -4,9 +4,14 @@
     {
       "src": "api/index.js",
       "use": "@vercel/node",
-      "config": { "includeFiles": ["prisma/schema.prisma",
-        "node_modules/@prisma/**",
-        "node_modules/.prisma/**"]} 
+      "config": { 
+        "includeFiles": [
+          "prisma/schema.prisma",
+          "node_modules/@prisma/**",
+          "node_modules/.prisma/**",
+          "generated/prisma/**"
+        ]
+      }
     }
   ],
   "routes": [
@@ -15,5 +20,10 @@
       "methods": ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
       "dest": "/api/index.js"
     }
-  ]
+  ],
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 10
+    }
+  }
 }
