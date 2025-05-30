@@ -23,10 +23,10 @@ app.options('*', cors(corsOptions)); // handle preflight
 app.use(express.json());
 
 // Routes
-app.use('/api/v1/users', usersRouter);
-app.use('/api/v1/foods', foodsRouter);
-app.use('/api/v1/recipes', recipesRouter);
-app.use('/api/v1/products', productsRouter);
+app.use('/v1/users', usersRouter);
+app.use('/v1/foods', foodsRouter);
+app.use('/v1/recipes', recipesRouter);
+app.use('/v1/products', productsRouter);
 
 module.exports = app;
 module.exports.handler = serverless(app);
