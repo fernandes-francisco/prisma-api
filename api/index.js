@@ -73,7 +73,7 @@ const server = http.createServer(async (req, res) => {
   // 5b) Dispatch routes
   switch (key) {
     // ─── 6) USERS ────────────────────────────────────────────────────
-    case 'GET /api/users':
+    case 'GET /api/v1/users':
       try {
         const users = await prisma.user.findMany();
         return sendJSON(res, 200, users);
@@ -81,7 +81,7 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 500, { error: e.message });
       }
 
-    case 'POST /api/users':
+    case 'POST /api/v1/users':
       {
         let body = '';
         req.on('data', (chunk) => (body += chunk));
@@ -105,7 +105,7 @@ const server = http.createServer(async (req, res) => {
       return; // important to break out
 
     // ─── 7) FOODS ────────────────────────────────────────────────────
-    case 'GET /api/foods':
+    case 'GET /api/v1/foods':
       {
         const userId = parseInt(parsedUrl.searchParams.get('userId'), 10);
         if (!userId) {
@@ -122,7 +122,7 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-    case 'POST /api/foods':
+    case 'POST /api/v1/foods':
       {
         let body = '';
         req.on('data', (chunk) => (body += chunk));
@@ -186,7 +186,7 @@ const server = http.createServer(async (req, res) => {
       return;
 
     // ─── 8) RECIPES (Spoonacular) ────────────────────────────────────
-    case 'GET /api/recipes':
+    case 'GET /api/v1/recipes':
       {
         const ingredients = parsedUrl.searchParams.get('ingredients');
         if (!ingredients) {
@@ -243,7 +243,7 @@ const server = http.createServer(async (req, res) => {
       }
 
     // ─── 9) PRODUCTS (OpenFoodFacts) ────────────────────────────────────
-    case 'GET /api/products':
+    case 'GET /api/v1/products':
       {
         const barcode = parsedUrl.searchParams.get('barcode');
         if (!barcode) {
