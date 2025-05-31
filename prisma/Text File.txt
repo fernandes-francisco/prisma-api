@@ -1,48 +1,290 @@
- 
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// api/index.js
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// 2) Then load your .env file and the rest of your imports:
+// 1) Force a valid debug URL so path-to-regexp won't choke:
+// process.env.DEBUG_URL = 'https://github.com/pillarjs/path-to-regexp#error';
+require('dotenv').config();
 
-generator client {
-  provider = "prisma-client-js"
+const express    = require('express');
+const cors       = require('cors');
+const { PrismaClient } = require('@prisma/client');
+const serverless = require('serverless-http');
+
+const usersRouter    = require('./users');
+const foodsRouter    = require('./foods');
+const recipesRouter  = require('./recipes');
+const productsRouter = require('./products');
+
+const app    = express();
+const prisma = new PrismaClient();
+
+// CORS & JSON
+app.use(cors({
+  origin: ['http://localhost:8100', process.env.ALLOWED_ORIGIN || '*'],
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization']
+}));
+app.options('*', cors());
+app.use(express.json());
+
+// Health check
+app.get('/', (req, res) => res.send('API is running'));
+
+// Mount routers
+app.use('/api/users',    usersRouter);
+app.use('/api/foods',    foodsRouter);
+app.use('/api/recipes',  recipesRouter);
+app.use('/api/products', productsRouter);
+
+// Export for Vercel or local
+if (process.env.NODE_ENV === 'production') {
+  module.exports = app;
+  module.exports.handler = serverless(app);
+} else {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => console.log(`Server listening on http://localhost:${PORT}`));
 }
 
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+const router = require('express').Router();
+const fetch = require('node-fetch');
+const { PrismaClient } = require('@prisma/client');
+
+const prisma = new PrismaClient();
+const UNSPLASH_KEY = "rWCUPHPcjJJ84mDg_VfiiuyAGWcNKYsQk6iczg0wwiA"
+
+// Helper to get or fetch an image URL by food name
+async function getOrFetchImage(name) {
+  // 1) Check cache in Image table
+  let img = await prisma.image.findUnique({ where: { name } });
+  if (img) return img.url;
+
+  // 2) Fetch from Unsplash
+  const apiUrl = `https://api.unsplash.com/search/photos?query=${encodeURIComponent(name)}&per_page=1&client_id=${UNSPLASH_KEY}`;
+  const resp = await fetch(apiUrl);
+  const data = await resp.json();
+  const url = data.results?.[0]?.urls?.small ?? null;
+
+  // 3) Cache the result if found
+  if (url) {
+    img = await prisma.image.create({
+      data: { name, url }
+    });
+    return img.url;
+  }
+  return null;
 }
 
-model User {
-  id         Int      @id @default(autoincrement())
-  name       String
-  email      String   @unique
-  password   String
-  foods      Food[]
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-}
+// GET /api/foods?userId=<id>
+router.get('/', async (req, res) => {
+  const userId = parseInt(req.query.userId, 10);
+  if (!userId) return res.status(400).json({ error: 'Missing userId' });
 
-model Image {
-  id        Int      @id @default(autoincrement())
-  name      String   @unique
-  url       String
-  foods     Food[]   
-  createdAt DateTime @default(now())
-}
+  try {
+    const foods = await prisma.food.findMany({
+      where: { userId },
+      include: { image: true }
+    });
+    res.json(foods);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
-model Food {
-  id             Int      @id @default(autoincrement())
-  name           String
-  quantity       Int
-  buyDate        DateTime
-  expirationDate DateTime
-  barcode        String?
-  image          Image?   @relation(fields: [imageId], references: [id])
-  imageId        Int?
-  user           User     @relation(fields: [userId], references: [id])
-  userId         Int
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-}
+// POST /api/foods
+router.post('/', async (req, res) => {
+  const { name, quantity, buyDate, expirationDate, barcode, userId } = req.body;
+  if (!name || !quantity || !buyDate || !expirationDate || !userId) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  try {
+    // Fetch or reuse image URL
+    const imageUrl = await getOrFetchImage(name);
+
+    // Create the Food item
+    const food = await prisma.food.create({
+      data: {
+        name,
+        quantity: parseInt(quantity, 10),
+        buyDate: new Date(buyDate),
+        expirationDate: new Date(expirationDate),
+        barcode: barcode || null,
+        user: { connect: { id: parseInt(userId, 10) } },
+        ...(imageUrl && {
+          image: {
+            connectOrCreate: {
+              where: { name },
+              create: { name, url: imageUrl }
+            }
+          }
+        })
+      },
+      include: { image: true }
+    });
+
+    res.status(201).json(food);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+module.exports = router;
+
+// api/products.js
+const router = require('express').Router();
+const fetch  = require('node-fetch');
+const { PrismaClient } = require('@prisma/client');
+
+const prisma = new PrismaClient();
+
+/**
+ * GET /api/v1/products?barcode=5601234567890
+ * Fetches from Open Food Facts, caches image URL in DB, and returns the record.
+ */
+router.get('/', async (req, res) => {
+  try {
+    const { barcode } = req.query;
+    if (!barcode) {
+      return res.status(400).json({ error: 'Missing barcode query parameter' });
+    }
+
+    // 1) Fetch from Open Food Facts
+    const url    = `https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(barcode)}.json`;
+    const apiRes = await fetch(url);
+    const data   = await apiRes.json();
+
+    if (data.status !== 1 || !data.product) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+
+    const productName = data.product.product_name || 'Unknown Product';
+    const imageUrl    = data.product.image_url || data.product.image_front_url || null;
+
+    // 2) Cache into your Image table (using barcode as unique key)
+    let imageRecord;
+    if (imageUrl) {
+      imageRecord = await prisma.image.upsert({
+        where: { name: barcode },       // use barcode as the unique identifier
+        update: { url: imageUrl },
+        create: { name: barcode, url: imageUrl },
+      });
+    }
+
+    // 3) Respond with both the fetched and cached data
+    res.json({
+      barcode,
+      name: productName,
+      imageUrl,
+      cachedAt: imageRecord?.createdAt || imageRecord?.updatedAt,
+    });
+  } catch (err) {
+    console.error('Product API error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+module.exports = router;
+
+// api/recipes.js
+const router = require('express').Router();
+const fetch  = require('node-fetch');
+require('dotenv').config();
+
+const API_KEY       = "9a0a6ef2971d4c29b04b6b5415a50366"
+const FIND_URL      = 'https://api.spoonacular.com/recipes/findByIngredients';
+const INFO_URL_BASE = 'https://api.spoonacular.com/recipes'; 
+
+/**
+ * GET /api/v1/recipes?ingredients=egg,tomato,cheese
+ * Returns one recipe with: name, photo, ingredients[], and instructions.
+ */
+router.get('/', async (req, res) => {
+  try {
+    const { ingredients } = req.query;
+    if (!ingredients) {
+      return res.status(400).json({ error: 'Missing ingredients query parameter' });
+    }
+
+    // 1) Find the best matching recipe ID
+    const findParams = new URLSearchParams({
+      apiKey:      API_KEY,
+      ingredients: ingredients,
+      number:      '1',
+      ranking:     '1',
+      ignorePantry:'true'
+    });
+    const findRes = await fetch(`${FIND_URL}?${findParams}`);
+    if (!findRes.ok) {
+      const txt = await findRes.text();
+      return res.status(findRes.status).json({ error: txt });
+    }
+    const [match] = await findRes.json();
+    if (!match) {
+      return res.status(404).json({ error: 'No recipe found' });
+    }
+
+    const recipeId = match.id;
+
+    // 2) Fetch full recipe information
+    const infoParams = new URLSearchParams({
+      apiKey: API_KEY,
+      includeNutrition: 'false'
+    });
+    const infoRes = await fetch(`${INFO_URL_BASE}/${recipeId}/information?${infoParams}`);
+    if (!infoRes.ok) {
+      const txt = await infoRes.text();
+      return res.status(infoRes.status).json({ error: txt });
+    }
+    const info = await infoRes.json();
+
+    // 3) Extract desired fields
+    const result = {
+      name:         info.title,
+      photo:        info.image,
+      ingredients:  info.extendedIngredients.map(i => i.original),
+      instructions: info.instructions // HTML string; you may strip tags on the client if needed
+    };
+
+    res.json(result);
+  } catch (err) {
+    console.error('Recipe API error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+module.exports = router;
+
+// api/users.js
+const express = require('express');
+const router = express.Router();
+const { PrismaClient } = require('@prisma/client'); // import only
+
+// GET all users
+router.get('/', async (req, res) => {
+  // Only instantiate when needed
+  const prisma = new PrismaClient();
+  try {
+    const users = await prisma.user.findMany();
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    await prisma.$disconnect();
+  }
+});
+
+// POST create user
+router.post('/', async (req, res) => {
+  const prisma = new PrismaClient();
+  const { name, email, password } = req.body;
+  try {
+    const user = await prisma.user.create({ data: { name, email, password } });
+    res.status(201).json(user);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  } finally {
+    await prisma.$disconnect();
+  }
+});
+
+module.exports = router;

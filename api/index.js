@@ -9,13 +9,11 @@ const PORT              = 3000;
 
 // 2) Imports & Prisma initialization
 require('dotenv').config(); // (optional—only if you want to mix in env later)
-const http           = require('http');
+const http             = require('http');
 const { PrismaClient } = require('@prisma/client');
-const prisma         = new PrismaClient({
+const prisma           = new PrismaClient({
   datasources: {
-    db: {
-      url: DATABASE_URL
-    }
+    db: { url: DATABASE_URL }
   }
 });
 
@@ -25,7 +23,7 @@ function sendJSON(res, statusCode, data) {
   res.writeHead(statusCode, {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization'
   });
   res.end(payload);
@@ -39,22 +37,46 @@ async function getOrFetchImage(name) {
     return img.url;
   }
 
-  // 4b) Otherwise, call Unsplash
-  const unsplashUrl =
-    `https://api.unsplash.com/search/photos?query=${encodeURIComponent(name)}` +
-    `&per_page=1&client_id=${UNSPLASH_KEY}`;
-  const resp = await fetch(unsplashUrl);
-  if (!resp.ok) return null;
-  const json = await resp.json();
-  const imageUrl = json.results?.[0]?.urls?.small || null;
+  // 4b) First, try Unsplash with "<name> food" to bias toward food images
+  const primaryQuery = `${name} food`;
+  let imageUrl = null;
+  try {
+    const primaryUrl =
+      `https://api.unsplash.com/search/photos?` +
+      `query=${encodeURIComponent(primaryQuery)}&per_page=1&client_id=${UNSPLASH_KEY}`;
+    const primaryResp = await fetch(primaryUrl);
+    if (primaryResp.ok) {
+      const primaryData = await primaryResp.json();
+      imageUrl = primaryData.results?.[0]?.urls?.small || null;
+    }
+  } catch (err) {
+    console.error('Erro no fetch primário do Unsplash:', err);
+  }
 
-  // 4c) If found, cache into Prisma
+  // 4c) If "<name> food" query yielded no result, fallback to "<name>" only
+  if (!imageUrl) {
+    try {
+      const fallbackUrl =
+        `https://api.unsplash.com/search/photos?` +
+        `query=${encodeURIComponent(name)}&per_page=1&client_id=${UNSPLASH_KEY}`;
+      const fallbackResp = await fetch(fallbackUrl);
+      if (fallbackResp.ok) {
+        const fallbackData = await fallbackResp.json();
+        imageUrl = fallbackData.results?.[0]?.urls?.small || null;
+      }
+    } catch (err) {
+      console.error('Erro no fetch de fallback do Unsplash:', err);
+    }
+  }
+
+  // 4d) Cache in the database if we found a URL
   if (imageUrl) {
     img = await prisma.image.create({
       data: { name, url: imageUrl }
     });
     return img.url;
   }
+
   return null;
 }
 
@@ -102,7 +124,7 @@ const server = http.createServer(async (req, res) => {
           }
         });
       }
-      return; // important to break out
+      return;
 
     // ─── 7) FOODS ────────────────────────────────────────────────────
     case 'GET /api/v1/foods':
@@ -185,119 +207,137 @@ const server = http.createServer(async (req, res) => {
       }
       return;
 
-    // ─── 8) RECIPES (Spoonacular) ────────────────────────────────────
-    case 'GET /api/v1/recipes':
-      {
-        const ingredients = parsedUrl.searchParams.get('ingredients');
-        if (!ingredients) {
-          return sendJSON(res, 400, {
-            error: 'Missing ingredients query parameter'
-          });
+    // ─── DELETE /api/v1/foods/:id ───────────────────────────────────────
+    default: {
+      if (method === 'DELETE' && pathname.startsWith('/api/v1/foods/')) {
+        const parts = pathname.split('/');
+        const idSegment = parts[parts.length - 1];
+        const id = parseInt(idSegment, 10);
+
+        if (Number.isNaN(id)) {
+          return sendJSON(res, 400, { error: 'Invalid food ID' });
         }
 
         try {
-          // 8a) Find recipe ID
-          const findParams = new URLSearchParams({
-            apiKey: SPOONACULAR_KEY,
-            ingredients,
-            number: '1',
-            ranking: '1',
-            ignorePantry: 'true'
-          });
-          const findRes = await fetch(
-            `https://api.spoonacular.com/recipes/findByIngredients?${findParams}`
-          );
-          if (!findRes.ok) {
-            const txt = await findRes.text();
-            return sendJSON(res, findRes.status, { error: txt });
-          }
-          const [match] = await findRes.json();
-          if (!match) {
-            return sendJSON(res, 404, { error: 'No recipe found' });
-          }
-
-          // 8b) Fetch recipe details
-          const infoParams = new URLSearchParams({
-            apiKey: SPOONACULAR_KEY,
-            includeNutrition: 'false'
-          });
-          const infoRes = await fetch(
-            `https://api.spoonacular.com/recipes/${match.id}/information?${infoParams}`
-          );
-          if (!infoRes.ok) {
-            const txt = await infoRes.text();
-            return sendJSON(res, infoRes.status, { error: txt });
-          }
-          const info = await infoRes.json();
-
-          // 8c) Return simplified data
-          return sendJSON(res, 200, {
-            name: info.title,
-            photo: info.image,
-            ingredients: info.extendedIngredients.map((i) => i.original),
-            instructions: info.instructions
-          });
+          await prisma.food.delete({ where: { id } });
+          return sendJSON(res, 200, { success: true });
         } catch (e) {
           return sendJSON(res, 500, { error: e.message });
         }
       }
-
-    // ─── 9) PRODUCTS (OpenFoodFacts) ────────────────────────────────────
-    case 'GET /api/v1/products':
-      {
-        const barcode = parsedUrl.searchParams.get('barcode');
-        if (!barcode) {
-          return sendJSON(res, 400, {
-            error: 'Missing barcode query parameter'
-          });
-        }
-
-        try {
-          // 9a) Fetch from OpenFoodFacts
-          const url = `https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(
-            barcode
-          )}.json`;
-          const apiRes = await fetch(url);
-          if (!apiRes.ok) {
-            return sendJSON(res, apiRes.status, {
-              error: 'Failed to fetch from OpenFoodFacts'
-            });
-          }
-          const data = await apiRes.json();
-          if (data.status !== 1 || !data.product) {
-            return sendJSON(res, 404, { error: 'Product not found' });
-          }
-
-          const productName = data.product.product_name || 'Unknown Product';
-          const imageUrl =
-            data.product.image_url || data.product.image_front_url || null;
-
-          // 9b) Cache the image (using barcode as unique key)
-          let imageRecord = null;
-          if (imageUrl) {
-            imageRecord = await prisma.image.upsert({
-              where: { name: barcode },
-              update: { url: imageUrl },
-              create: { name: barcode, url: imageUrl }
-            });
-          }
-
-          return sendJSON(res, 200, {
-            barcode,
-            name: productName,
-            imageUrl,
-            cachedAt:
-              imageRecord?.updatedAt || imageRecord?.createdAt || null
-          });
-        } catch (e) {
-          return sendJSON(res, 500, { error: e.message });
-        }
-      }
-
-    // ─── Default: 404 ────────────────────────────────────────────────────
-    default:
-      return sendJSON(res, 404, { error: 'Not found' });
+      break; // Continue to next checks
+    }
   }
+
+  // ─── 8) RECIPES (Spoonacular) ────────────────────────────────────
+  if (key === 'GET /api/v1/recipes') {
+    const ingredients = parsedUrl.searchParams.get('ingredients');
+    if (!ingredients) {
+      return sendJSON(res, 400, {
+        error: 'Missing ingredients query parameter'
+      });
+    }
+
+    try {
+      // 8a) Find recipe ID
+      const findParams = new URLSearchParams({
+        apiKey: SPOONACULAR_KEY,
+        ingredients,
+        number: '1',
+        ranking: '1',
+        ignorePantry: 'true'
+      });
+      const findRes = await fetch(
+        `https://api.spoonacular.com/recipes/findByIngredients?${findParams}`
+      );
+      if (!findRes.ok) {
+        const txt = await findRes.text();
+        return sendJSON(res, findRes.status, { error: txt });
+      }
+      const [match] = await findRes.json();
+      if (!match) {
+        return sendJSON(res, 404, { error: 'No recipe found' });
+      }
+
+      // 8b) Fetch recipe details
+      const infoParams = new URLSearchParams({
+        apiKey: SPOONACULAR_KEY,
+        includeNutrition: 'false'
+      });
+      const infoRes = await fetch(
+        `https://api.spoonacular.com/recipes/${match.id}/information?${infoParams}`
+      );
+      if (!infoRes.ok) {
+        const txt = await infoRes.text();
+        return sendJSON(res, infoRes.status, { error: txt });
+      }
+      const info = await infoRes.json();
+
+      // 8c) Return simplified data
+      return sendJSON(res, 200, {
+        name: info.title,
+        photo: info.image,
+        ingredients: info.extendedIngredients.map((i) => i.original),
+        instructions: info.instructions
+      });
+    } catch (e) {
+      return sendJSON(res, 500, { error: e.message });
+    }
+  }
+
+  // ─── 9) PRODUCTS (OpenFoodFacts) ────────────────────────────────────
+  if (key === 'GET /api/v1/products') {
+    const barcode = parsedUrl.searchParams.get('barcode');
+    if (!barcode) {
+      return sendJSON(res, 400, {
+        error: 'Missing barcode query parameter'
+      });
+    }
+
+    try {
+      // 9a) Fetch from OpenFoodFacts
+      const url = `https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(
+        barcode
+      )}.json`;
+      const apiRes = await fetch(url);
+      if (!apiRes.ok) {
+        return sendJSON(res, apiRes.status, {
+          error: 'Failed to fetch from OpenFoodFacts'
+        });
+      }
+      const data = await apiRes.json();
+      if (data.status !== 1 || !data.product) {
+        return sendJSON(res, 404, { error: 'Product not found' });
+      }
+
+      const productName = data.product.product_name || 'Unknown Product';
+      const imageUrl =
+        data.product.image_url || data.product.image_front_url || null;
+
+      // 9b) Cache the image (using barcode as unique key)
+      let imageRecord = null;
+      if (imageUrl) {
+        imageRecord = await prisma.image.upsert({
+          where: { name: barcode },
+          update: { url: imageUrl },
+          create: { name: barcode, url: imageUrl }
+        });
+      }
+
+      return sendJSON(res, 200, {
+        barcode,
+        name: productName,
+        imageUrl,
+        cachedAt:
+          imageRecord?.updatedAt || imageRecord?.createdAt || null
+      });
+    } catch (e) {
+      return sendJSON(res, 500, { error: e.message });
+    }
+  }
+
+  // ─── Default: 404 ────────────────────────────────────────────────────
+  return sendJSON(res, 404, { error: 'Not found' });
 });
 
 // 10) Start the server
