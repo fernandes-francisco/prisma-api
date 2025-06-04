@@ -4,7 +4,7 @@
 const DATABASE_URL      = 'postgresql://postgres.gbxmofoqcszpizdqqxly:postgres123!@aws-0-eu-west-3.pooler.supabase.com:5432/postgres';
 const SPOONACULAR_KEY   = '9a0a6ef2971d4c29b04b6b5415a50366';
 const UNSPLASH_KEY      = 'rWCUPHPcjJJ84mDg_VfiiuyAGWcNKYsQk6iczg0wwiA';
-const ALLOWED_ORIGIN    = 'http://localhost:8100';
+const ALLOWED_ORIGIN    = '*';
 const PORT              = 3000;
 
 // 2) Imports & Prisma initialization
